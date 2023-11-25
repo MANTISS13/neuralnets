@@ -1,5 +1,6 @@
 """Seminar 6. Image Binary Classification with Keras. ML ops."""
 import argparse
+import glob
 import os
 import zipfile
 import shutil
@@ -7,6 +8,9 @@ from urllib.request import urlretrieve
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
+from tensorflow.io import read_file, write_file
+from tensorflow.image import decode_image
+from tensorflow.keras.models import load_model
 import boto3
 import dotenv
 
@@ -84,23 +88,16 @@ def make_model(input_shape, num_classes):
 
 
 def fi():
-    num_skipped = 0
+    num_deleted = 0
     for folder_name in ("Cat", "Dog"):
-        folder_path = os.path.join(PATH_TO_DATA + "/PetImages", folder_name)
-        for fname in os.listdir(folder_path):
-            fpath = os.path.join(folder_path, fname)
-            try:
-                fobj = open(fpath, "rb")
-                is_jfif = tf.compat.as_bytes("JFIF") in fobj.peek(10)
-            finally:
-                fobj.close()
-
-            if not is_jfif:
-                num_skipped += 1
-                # Delete corrupted image
-                os.remove(fpath)
-
-    print("Deleted %d images" % num_skipped)
+        folder_path = os.path.join(PATH_TO_DATA + "/PetImages", folder_name, '/*.jpg')
+        for image in sorted(glob.glob(folder_path)):
+            img = read_file(str(image))
+            img = decode_image(img)
+            if img.shape[2] != 3:
+                num_deleted += 1
+                os.remove(image)
+    print("Deleted %d images" % num_deleted)
 
 
 def confi():
@@ -134,13 +131,14 @@ def confi():
 
 
 def train():
+    print('Training model')
     """Pipeline: Build, train and save model to models/model_6"""
     # Todo: Copy some code from seminar5 and https://keras.io/examples/vision/image_classification_from_scratch/
     train_ds, val_ds = confi()
 
     ############
     model = make_model(input_shape=image_size + (3,), num_classes=2)
-    epochs = 25
+    epochs = 4
 
     callbacks = [
         keras.callbacks.ModelCheckpoint("save_at_{epoch}.keras"),
@@ -156,8 +154,13 @@ def train():
         callbacks=callbacks,
         validation_data=val_ds,
     )
-    print('Training model')
+    model.save(PATH_TO_MODEL)
 
+
+def load(fb):
+    # Загрузка сохраненной модели
+    loaded_model = load_model(fb)
+    loaded_model.save(PATH_TO_MODEL)
 
 def upload():
     """Pipeline: Upload model to S3 storage"""
@@ -188,6 +191,7 @@ if __name__ == '__main__':
         description='Typical DL lifecycle pipelines.')
     parser.add_argument('--download', action='store_true', help='Download images and extract to data/raw directory')
     parser.add_argument('--train', action='store_true', help='Build, train and save model to models/seminar6_model')
+    parser.add_argument('--saved', action='store_true', help='imp saved mod')
     parser.add_argument('--upload', action='store_true', help='Upload model to S3 storage')
     args = parser.parse_args()
     if args.download:
@@ -195,5 +199,7 @@ if __name__ == '__main__':
         fi()
     if args.train:
         train()
+    if args.saved:
+        load('save_at_3.keras')
     if args.upload:
         upload()
